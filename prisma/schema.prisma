@@ -1,0 +1,165 @@
+// Prisma schema for NetWorth OS
+// Run `npx prisma migrate dev --name init` after setting DATABASE_URL in .env
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+enum AssetCategory {
+  STOCKS
+  MUTUAL_FUNDS
+  GOLD
+  REAL_ESTATE
+  VEHICLES
+  BANK_ACCOUNTS
+  RETIREMENT // PF / NPS
+  CASH
+  OTHER
+}
+
+enum LiabilityCategory {
+  HOME_LOAN
+  EDUCATION_LOAN
+  CREDIT_CARD
+  PERSONAL_LOAN
+  VEHICLE_LOAN
+  OTHER_DEBT
+}
+
+enum InsuranceType {
+  TERM_LIFE
+  ENDOWMENT
+  ACCIDENTAL
+  HEALTH
+  ULIP
+  GROUP
+}
+
+model User {
+  id            String   @id @default(cuid())
+  name          String?
+  email         String   @unique
+  passwordHash  String?
+  role          Role     @default(OWNER)
+  createdAt     DateTime @default(now())
+
+  assets        Asset[]
+  liabilities   Liability[]
+  policies      InsurancePolicy[]
+  snapshots     NetWorthSnapshot[]
+  auditLogs     AuditLog[]
+}
+
+model Asset {
+  id            String        @id @default(cuid())
+  name          String
+  category      AssetCategory
+  currentValue  Decimal       @db.Decimal(14, 2) // in INR lakhs
+  costBasis     Decimal?      @db.Decimal(14, 2)
+  notes         String?
+  acquiredOn    DateTime?
+  quarterTag    String        @default("30-Jun") // mirrors original sheet's quarter columns
+  isLiquid      Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  userId        String
+  user          User          @relation(fields: [userId], references: [id])
+  history       AssetHistory[]
+
+  @@index([userId, category])
+}
+
+model AssetHistory {
+  id        String   @id @default(cuid())
+  value     Decimal  @db.Decimal(14, 2)
+  recordedAt DateTime @default(now())
+
+  assetId   String
+  asset     Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId])
+}
+
+model Liability {
+  id               String            @id @default(cuid())
+  name             String
+  category         LiabilityCategory
+  outstanding      Decimal           @db.Decimal(14, 2)
+  originalAmount   Decimal?          @db.Decimal(14, 2)
+  emi              Decimal?          @db.Decimal(14, 2)
+  interestRate     Decimal?          @db.Decimal(5, 2) // percent
+  tenureMonths     Int?
+  remainingMonths  Int?
+  lender           String?
+  quarterTag       String            @default("30-Jun")
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  userId           String
+  user             User              @relation(fields: [userId], references: [id])
+
+  @@index([userId, category])
+}
+
+model InsurancePolicy {
+  id            String        @id @default(cuid())
+  provider      String
+  policyType    InsuranceType
+  policyNumber  String?
+  sumAssured    Decimal       @db.Decimal(14, 2)
+  premium       Decimal       @db.Decimal(14, 2)
+  premiumCycle  String        @default("annual") // annual | monthly | single
+  nominee       String?
+  startDate     DateTime?
+  expiryDate    DateTime?
+  quarterTag    String        @default("30-Jun")
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  userId        String
+  user          User          @relation(fields: [userId], references: [id])
+
+  @@index([userId, policyType])
+}
+
+model NetWorthSnapshot {
+  id           String   @id @default(cuid())
+  totalAssets  Decimal  @db.Decimal(14, 2)
+  totalLiab    Decimal  @db.Decimal(14, 2)
+  netWorth     Decimal  @db.Decimal(14, 2)
+  totalCover   Decimal  @db.Decimal(14, 2)
+  asOf         DateTime
+  quarterTag   String
+
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, quarterTag])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  action      String   // CREATE | UPDATE | DELETE
+  entityType  String   // Asset | Liability | InsurancePolicy
+  entityId    String
+  entityName  String
+  diff        Json?
+  createdAt   DateTime @default(now())
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+}

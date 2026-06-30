@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+* {
+  border-color: theme('colors.ink.700');
+}
+
+body {
+  background: #0a0b0d;
+  color: #f2f1ed;
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+}
+
+::selection {
+  background: rgba(212, 162, 78, 0.3);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #26272d;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.animate-stagger > * {
+  animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.animate-stagger > *:nth-child(2) { animation-delay: 60ms; }
+.animate-stagger > *:nth-child(3) { animation-delay: 120ms; }
+.animate-stagger > *:nth-child(4) { animation-delay: 180ms; }
+.animate-stagger > *:nth-child(5) { animation-delay: 240ms; }
+.animate-stagger > *:nth-child(6) { animation-delay: 300ms; }
