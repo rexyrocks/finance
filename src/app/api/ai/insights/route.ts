@@ -1,65 +1,145 @@
-import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
-import { getAssets, getLiabilities, getPolicies } from '@/lib/fetchers';
-import { totalAssets, totalLiabilities, totalCover, netWorth, allocationByCategory, financialHealthScore } from '@/lib/calculations';
+import { NextRequest, NextResponse } from "next/server";
+import OpenAI from "openai";
+
+import {
+  getAssets,
+  getLiabilities,
+  getPolicies,
+} from "@/lib/fetchers";
+
+import {
+  totalAssets,
+  totalLiabilities,
+  totalCover,
+  netWorth,
+  allocationByCategory,
+  financialHealthScore,
+} from "@/lib/calculations";
 
 // POST { question: string } -> { answer: string }
-// Requires ANTHROPIC_API_KEY in the environment. Grounds the model in the
-// user's real, current portfolio numbers so answers aren't hallucinated.
+// Requires XAI_API_KEY in the environment.
 export async function POST(req: NextRequest) {
-  const { question } = (await req.json()) as { question?: string };
-  if (!question) {
-    return NextResponse.json({ error: 'Missing "question" in request body.' }, { status: 400 });
-  }
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json(
-      { error: 'ANTHROPIC_API_KEY is not configured on the server.' },
-      { status: 500 },
+  try {
+    const { question } = (await req.json()) as {
+      question?: string;
+    };
+
+    if (!question) {
+      return NextResponse.json(
+        { error: 'Missing "question" in request body.' },
+        { status: 400 }
+      );
+    }
+
+    if (!process.env.XAI_API_KEY) {
+      return NextResponse.json(
+        {
+          error: "XAI_API_KEY is not configured on the server.",
+        },
+        { status: 500 }
+      );
+    }
+
+    const [assets, liabilities, policies] = await Promise.all([
+      getAssets(),
+      getLiabilities(),
+      getPolicies(),
+    ]);
+
+    const ta = totalAssets(assets);
+    const tl = totalLiabilities(liabilities);
+    const cover = totalCover(policies);
+    const nw = netWorth(assets, liabilities);
+    const allocation = allocationByCategory(assets);
+    const health = financialHealthScore(
+      assets,
+      liabilities,
+      policies
     );
-  }
 
-  const [assets, liabilities, policies] = await Promise.all([getAssets(), getLiabilities(), getPolicies()]);
-  const ta = totalAssets(assets);
-  const tl = totalLiabilities(liabilities);
-  const cover = totalCover(policies);
-  const nw = netWorth(assets, liabilities);
-  const allocation = allocationByCategory(assets);
-  const health = financialHealthScore(assets, liabilities, policies);
+    const context = `
+Portfolio snapshot (INR Lakhs)
 
-  const context = `
-Portfolio snapshot (INR lakhs, quarter ending 30-Jun):
-- Total assets: ${ta.toFixed(2)}
-- Total liabilities: ${tl.toFixed(2)}
-- Net worth: ${nw.toFixed(2)}
-- Total insurance cover: ${cover.toFixed(2)}
-- Financial health score: ${health.score}/100
-- Asset allocation: ${allocation.map((a) => `${a.label} ${a.pct}%`).join(', ')}
-- Assets list: ${assets.map((a) => `${a.name} (${a.category}): ${a.currentValue}`).join('; ')}
-- Liabilities list: ${liabilities.map((l) => `${l.name} (${l.category}): ${l.outstanding}`).join('; ')}
-- Insurance list: ${policies.map((p) => `${p.provider} (${p.policyType}): ${p.sumAssured}`).join('; ')}
+Total Assets: ${ta.toFixed(2)}
+Total Liabilities: ${tl.toFixed(2)}
+Net Worth: ${nw.toFixed(2)}
+Insurance Cover: ${cover.toFixed(2)}
+Financial Health Score: ${health.score}/100
+
+Asset Allocation:
+${allocation
+        .map((a) => `- ${a.label}: ${a.pct}%`)
+        .join("\n")}
+
+Assets:
+${assets
+        .map(
+          (a) =>
+            `- ${a.name} (${a.category}): ₹${a.currentValue}`
+        )
+        .join("\n")}
+
+Liabilities:
+${liabilities
+        .map(
+          (l) =>
+            `- ${l.name} (${l.category}): ₹${l.outstanding}`
+        )
+        .join("\n")}
+
+Insurance Policies:
+${policies
+        .map(
+          (p) =>
+            `- ${p.provider} (${p.policyType}): ₹${p.sumAssured}`
+        )
+        .join("\n")}
 `.trim();
 
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const client = new OpenAI({
+      apiKey: process.env.XAI_API_KEY,
+      baseURL: "https://api.x.ai/v1",
+    });
 
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 600,
-    system:
-      'You are a precise personal-finance assistant embedded in a net worth dashboard. ' +
-      'Answer only from the portfolio data given to you — never invent figures. ' +
-      'Keep answers concise, use INR lakhs, and avoid generic disclaimers beyond one short note that this is not professional financial advice when giving a recommendation.',
-    messages: [
+    const completion = await client.chat.completions.create({
+      model: "grok-4",
+
+      temperature: 0.3,
+
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a professional personal finance assistant embedded inside a Net Worth dashboard. " +
+            "Only use the portfolio information supplied to you. " +
+            "Never fabricate values or assumptions. " +
+            "Keep responses concise, practical, and easy to understand. " +
+            "When recommending financial actions, include one brief note that this is not professional financial advice.",
+        },
+        {
+          role: "user",
+          content: `${context}\n\nQuestion: ${question}`,
+        },
+      ],
+    });
+
+    const answer =
+      completion.choices[0]?.message?.content ??
+      "No response generated.";
+
+    return NextResponse.json({
+      answer,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return NextResponse.json(
       {
-        role: 'user',
-        content: `${context}\n\nQuestion: ${question}`,
+        error: "Failed to generate AI response.",
       },
-    ],
-  });
-
-  const answer = message.content
-    .map((block) => (block.type === 'text' ? block.text : ''))
-    .join('\n')
-    .trim();
-
-  return NextResponse.json({ answer });
+      {
+        status: 500,
+      }
+    );
+  }
 }
